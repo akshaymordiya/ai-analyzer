@@ -127,18 +127,18 @@ ${networkAnalysis.clientErrors.length > 0 ? `
 
       // Phase 1: Analyze Jira issue fields + HAR files together
       const phase1Prompt = `
-JIRA ISSUE DETAILS:
+You are an expert Jira engineer analyzing network logs and Jira issue data to identify technical root causes. Your job is to provide evidence-based analysis based ONLY on the data provided.
+
+JIRA ISSUE DATA:
 Key: ${issue.key}
 Summary: ${issue.summary}
 Description: ${issue.description}
-Status: ${issue.status}
-Priority: ${issue.priority}
-Assignee: ${issue.assignee}
-Reporter: ${issue.reporter}
-Created: ${issue.created}
-Updated: ${issue.updated}
 
-${networkSummary}
+NETWORK LOGS ANALYSIS:
+${networkAnalysis ? networkAnalysis.summary : 'No network logs available'}
+
+${networkAnalysis ? `DETAILED NETWORK FINDINGS:
+${networkAnalysis.detailedAnalysis || 'No detailed analysis available'}` : ''}
 
 INSTRUCTIONS:
 You are an expert Jira engineer and network debugging specialist. Your job is to INVESTIGATE and ANALYZE the actual evidence from the network logs and Jira issue, not to provide generic troubleshooting steps.
@@ -153,7 +153,7 @@ Based on the detailed network analysis, provide a comprehensive INVESTIGATION th
 
 4. SPECIFIC INSIGHTS: What specific technical insights can you draw from the failed requests, response bodies, headers, and timing data?
 
-5. ACTIONABLE NEXT STEPS: Based on your investigation, what are the most logical next steps for the developer to take? Focus on what the evidence suggests should be investigated first.
+5. ACTIONABLE NEXT STEPS: Based on your investigation, what are the most logical next steps need to be taken to resolve the issue? Focus on what the evidence suggests should be investigated first.
 
 Output ONLY a JSON object with the following fields:
 {
@@ -209,11 +209,7 @@ Create a comprehensive Jira comment that includes:
 
 2. ERROR DETAILS: Provide specific details about the failed requests, including HTTP status codes, response times, and any patterns identified.
 
-3. CONTEXT FROM COMMENTS: How do the team's comments relate to or support the technical findings? What additional context do they provide?
-
-4. SPECIFIC NEXT STEPS: Based on the evidence, what are the most logical and specific next steps for the team to take? Include technical actions and investigation priorities.
-
-5. ACTIONABLE RECOMMENDATIONS: What specific technical actions should be taken to resolve the issue?
+3. ACTIONABLE RECOMMENDATIONS: What specific technical actions should be taken to resolve the issue?
 
 The comment should be structured, technical, and immediately actionable for the development team.
 
@@ -221,12 +217,14 @@ Output ONLY a JSON object with the following fields:
 {
   "commentInsights": "Analysis of what the actual comment content reveals about the issue, team understanding, and progression. Reference specific comments and their implications.",
   "commentSuggestions": "Based on the comment analysis, what specific insights or actions would be most valuable for the team to consider.",
-  "jiraComment": "A comprehensive, structured Jira comment that includes: 1) Root cause analysis with specific technical details from the network logs, 2) Error details including HTTP status codes and failed APIs, 3) Context from team comments, 4) Specific next steps and technical actions to take, 5) Actionable recommendations for resolution. The comment should be technical, evidence-based, and immediately actionable."
+  "jiraComment": "A comprehensive, structured Jira comment that includes: 1) Root cause analysis with specific technical details from the network logs, 2) Error details including HTTP status codes and failed APIs, 3) Specific next steps and technical actions to take, 4) Actionable recommendations for resolution. The comment should be technical, evidence-based, and immediately actionable. For Actionable Recommendations, use phrases like 'To resolve this issue, we need to check...' or 'The resolution requires...' instead of 'The developer should...'"
 }
 - Output ONLY the JSON object, nothing else.
 - The jiraComment should be comprehensive and include all the technical details from Phase 1 analysis.
 - Focus on providing actionable, technical guidance based on the evidence.
-- Structure the comment clearly with sections for root cause, errors, context, and next steps.
+- Structure the comment clearly with sections for root cause, errors, next steps, and recommendations.
+- Do NOT include a "Context from Comments" section.
+- Make Actionable Recommendations less directive by using "we need to" or "the resolution requires" instead of "the developer should".
 `;
       spinner.start('Analyzing comments and generating final Jira comment...');
       let phase2Analysis;

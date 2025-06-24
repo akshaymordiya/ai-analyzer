@@ -2,29 +2,63 @@ import chalk from 'chalk';
 export class NetworkAnalyzer {
     static parseHARFile(harContent) {
         try {
-            const har = JSON.parse(harContent);
+            console.log(chalk.blue('🔍 DEBUG: Starting HAR parsing...'));
+            console.log(chalk.blue('🔍 DEBUG: HAR content length:'), harContent.length);
+            console.log(chalk.blue('🔍 DEBUG: HAR content preview:'), harContent.substring(0, 200) + '...');
+            let har;
+            try {
+                har = JSON.parse(harContent);
+            }
+            catch (parseError) {
+                console.log(chalk.red('❌ DEBUG: JSON parse failed at position:'), parseError.message);
+                // Try to fix common JSON issues
+                let fixedContent = harContent;
+                // Remove any trailing commas
+                fixedContent = fixedContent.replace(/,(\s*[}\]])/g, '$1');
+                // Try to find the problematic position and show context
+                const errorPosition = parseInt(parseError.message.match(/position (\d+)/)?.[1] || '0');
+                if (errorPosition > 0) {
+                    const start = Math.max(0, errorPosition - 50);
+                    const end = Math.min(harContent.length, errorPosition + 50);
+                    console.log(chalk.yellow('🔍 DEBUG: Error context:'), harContent.substring(start, end));
+                }
+                try {
+                    har = JSON.parse(fixedContent);
+                    console.log(chalk.green('✅ DEBUG: Fixed JSON parsing succeeded'));
+                }
+                catch (secondError) {
+                    console.log(chalk.red('❌ DEBUG: Fixed JSON also failed:'), secondError);
+                    throw parseError; // Throw original error
+                }
+            }
             const logs = [];
             // Handle different HAR file structures
             let entries = [];
             if (har.log && har.log.entries) {
                 entries = har.log.entries;
+                console.log(chalk.blue('🔍 DEBUG: Found entries in har.log.entries'));
             }
             else if (har.entries) {
                 entries = har.entries;
+                console.log(chalk.blue('🔍 DEBUG: Found entries in har.entries'));
             }
             else if (Array.isArray(har)) {
                 entries = har;
+                console.log(chalk.blue('🔍 DEBUG: Found entries as direct array'));
             }
             else {
                 console.log(chalk.yellow('HAR file structure:'), JSON.stringify(har, null, 2).substring(0, 500) + '...');
                 throw new Error('Invalid HAR file structure - no entries found');
             }
             console.log(chalk.blue(`Found ${entries.length} entries in HAR file`));
-            for (const entry of entries) {
+            for (let i = 0; i < entries.length; i++) {
+                const entry = entries[i];
                 try {
+                    console.log(chalk.gray(`🔍 DEBUG: Processing entry ${i + 1}/${entries.length}`));
                     // Handle different entry structures
                     const request = entry.request || entry;
                     const response = entry.response || {};
+                    console.log(chalk.gray(`🔍 DEBUG: Entry ${i + 1} - URL: ${request.url || 'N/A'}, Method: ${request.method || 'N/A'}`));
                     const log = {
                         url: request.url || request.uri || '',
                         method: request.method || 'GET',
@@ -39,16 +73,18 @@ export class NetworkAnalyzer {
                     // Validate the log entry
                     if (log.url && log.method) {
                         logs.push(log);
+                        console.log(chalk.green(`✅ DEBUG: Entry ${i + 1} added successfully`));
                     }
                     else {
-                        console.log(chalk.yellow(`Skipping invalid entry: ${JSON.stringify(entry).substring(0, 200)}...`));
+                        console.log(chalk.yellow(`⚠️ DEBUG: Skipping invalid entry ${i + 1}: missing URL or method`));
                     }
                 }
                 catch (entryError) {
-                    console.log(chalk.yellow(`Error parsing entry: ${entryError}`));
-                    console.log(chalk.gray(`Entry data: ${JSON.stringify(entry).substring(0, 300)}...`));
+                    console.log(chalk.yellow(`⚠️ DEBUG: Error parsing entry ${i + 1}: ${entryError}`));
+                    console.log(chalk.gray(`Entry ${i + 1} data: ${JSON.stringify(entry).substring(0, 300)}...`));
                 }
             }
+            console.log(chalk.green(`✅ DEBUG: Successfully parsed ${logs.length} network logs`));
             return logs;
         }
         catch (error) {
