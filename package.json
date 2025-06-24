@@ -1,0 +1,41 @@
+{
+  "name": "ai-debug-helper",
+  "version": "1.0.0",
+  "main": "index.js",
+  "bin": {
+    "ai-debug-helper": "dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "keywords": [
+    "jira",
+    "debug",
+    "ai",
+    "cli",
+    "msh",
+    "groq"
+  ],
+  "author": "",
+  "license": "ISC",
+  "description": "AI-powered CLI tool for analyzing MSH tickets and network logs from Jira (using Groq LLM)",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "chalk": "^5.4.1",
+    "clipboardy": "^4.0.0",
+    "commander": "^11.1.0",
+    "conf": "^12.0.0",
+    "har-validator": "^5.1.5",
+    "inquirer": "^12.6.3",
+    "ora": "^7.0.1",
+    "simple-git": "^3.28.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.3",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  },
+  "type": "module"
+}
