@@ -125,32 +125,52 @@ ${networkAnalysis.clientErrors.length > 0 ? `
 ` : ''}
 ` : 'No network logs available.';
 
-      // Phase 1: Analyze Jira issue fields + HAR files together
+      // Create a minimal Jira issue summary instead of full object
+      const issueSummary = {
+        key: issue.key,
+        summary: issue.summary,
+        description: issue.description ? issue.description.substring(0, 1000) + (issue.description.length > 1000 ? '...' : '') : '',
+        status: issue.status,
+        priority: issue.priority,
+        assignee: issue.assignee,
+        reporter: issue.reporter,
+        created: issue.created,
+        updated: issue.updated
+      };
+
+      // Debug logging for issue description
+      console.log(chalk.blue('🔍 DEBUG: Issue description length:'), issue.description?.length || 0);
+      console.log(chalk.blue('🔍 DEBUG: Issue description preview:'), issue.description?.substring(0, 200) + '...');
+      console.log(chalk.blue('🔍 DEBUG: Issue summary:'), issue.summary);
+
+      // Phase 1: Analyze issue fields + network logs
       const phase1Prompt = `
-You are an expert Jira engineer analyzing network logs and Jira issue data to identify technical root causes. Your job is to provide evidence-based analysis based ONLY on the data provided.
+JIRA ISSUE SUMMARY:
+${JSON.stringify(issueSummary, null, 2)}
 
-JIRA ISSUE DATA:
-Key: ${issue.key}
-Summary: ${issue.summary}
-Description: ${issue.description}
-
-NETWORK LOGS ANALYSIS:
-${networkAnalysis ? networkAnalysis.summary : 'No network logs available'}
-
-${networkAnalysis ? `DETAILED NETWORK FINDINGS:
-${networkAnalysis.detailedAnalysis || 'No detailed analysis available'}` : ''}
+NETWORK LOGS SUMMARY:
+${networkSummary}
 
 CRITICAL INSTRUCTIONS:
-You are an expert Jira engineer and application debugging specialist. Your job is to INVESTIGATE and ANALYZE both network failures AND data/content from the network logs.
+You are an expert Jira engineer analyzing network logs and Jira issue data. Your task is to identify the root cause of the reported issue by examining API failures and data content patterns.
 
 ⚠️ IMPORTANT RULES:
-1. FIRST PRIORITY: Identify and analyze any API failures (4xx/5xx status codes) - these are critical issues
+1. FIRST PRIORITY: Address any API failures (4xx/5xx status codes) - these are critical issues
 2. SECOND PRIORITY: Analyze data content for UI state issues (permission flags, feature flags, empty data)
 3. IGNORE response times for successful requests (status 200-299) - these don't cause UI issues
 4. Be specific about what data actually causes UI issues
-5. If no API failures AND no relevant data patterns found, say "All network calls look good - issue likely in application logic or data processing."
+5. If no API failures AND no relevant data patterns found, clearly state that the issue is likely in application logic, not network data
+6. ONLY analyze data that is actually present in the network logs - DO NOT make assumptions about data that might exist
+7. If the network logs don't contain relevant data for the reported issue, clearly state this
 
-Based on the detailed network analysis, provide a comprehensive INVESTIGATION that includes:
+ANALYSIS REQUIREMENTS:
+1. THOROUGHLY ANALYZE the Jira issue description - look for specific symptoms, expected behavior, and acceptance criteria
+2. CORRELATE the issue description with network data - what APIs would be involved in this functionality?
+3. IDENTIFY specific data patterns that could cause the described issue
+4. PROVIDE EVIDENCE-BASED analysis linking the issue description to network findings
+5. If the network logs don't contain APIs related to the reported functionality, state this clearly
+
+Based on the network analysis, provide a comprehensive INVESTIGATION that includes:
 
 1. API FAILURE ANALYSIS: Are there any failed API calls (4xx/5xx status codes)? If yes, analyze:
    - Specific error codes and their meanings
@@ -163,6 +183,7 @@ Based on the detailed network analysis, provide a comprehensive INVESTIGATION th
    - Business logic conditions that affect UI state
    - Missing or incomplete data that could cause functionality issues
    - Permission flags, feature flags, or configuration settings
+   - ONLY analyze data that is actually present in the response bodies
 
 3. UI STATE IMPLICATIONS: Based on the data returned, what would be the expected UI behavior? Consider:
    - What conditions would cause buttons to be disabled/grayed out?
@@ -177,6 +198,7 @@ Based on the detailed network analysis, provide a comprehensive INVESTIGATION th
    - Permission/authorization data that might restrict functionality
    - Configuration data that might disable features
    - State data that might indicate why certain actions are unavailable
+   - ONLY reference data that is actually present in the responses
 
 7. ACTIONABLE NEXT STEPS: Based on your analysis, what specific investigation should be done? Prioritize:
    - First: Fix any API failures identified
@@ -186,11 +208,10 @@ Based on the detailed network analysis, provide a comprehensive INVESTIGATION th
 Output ONLY a JSON object with the following fields:
 {
   "apiFailureAnalysis": "Analysis of any failed API calls (4xx/5xx status codes), including specific error codes, failed endpoints, and error patterns. If no failures, state 'No API failures detected.'",
-  "dataAnalysis": "A detailed analysis of the actual data/content returned by the APIs, focusing on what the data contains and how it might affect UI state. Reference specific response bodies and data patterns. If no relevant patterns found, state 'No obvious data patterns that would cause UI issues detected.'",
-  "uiStateAnalysis": "Analysis of how the returned data would affect UI behavior, including conditions that might cause buttons to be disabled or features to be unavailable. Be specific about what data actually controls UI state.",
-  "businessLogicInsights": "Insights about business rules, permissions, or configuration that might be affecting the application's behavior based on the data returned.",
-  "evidenceFromData": "Specific evidence from the API response data that supports the analysis, including exact data patterns, values, or content that explains the observed behavior.",
-  "investigationSteps": "Specific steps to investigate the root cause, prioritizing API failures first, then data validation, business logic verification, and configuration checks.",
+  "dataAnalysis": "A detailed analysis of the actual data/content returned by the APIs, focus and identify the api calls that are relevant to the reported issue. and analyze the data returned by the api calls. Reference specific response bodies and data patterns. If no relevant patterns found, state 'No obvious data patterns that would cause UI issues detected.' If the network logs don't contain APIs related to the reported functionality, state 'Network logs do not contain APIs related to the reported functionality.'",
+  "uiStateAnalysis": "Analysis of what returned data likely return by the api call which is relevant to the reported issue would affect UI behavior, including conditions that might cause the reported issue. Be specific about what data actually controls UI state. If no relevant data found, state 'No UI state controlling data found in network logs.'",
+  "evidenceFromData": "Specific evidence from the API response data that supports the analysis, including exact data patterns, values, or content that explains the observed behavior. If no relevant evidence found, state 'No specific evidence from network data to support the reported issue.'",
+  "investigationSteps": "Specific steps to investigate the root cause, prioritizing API failures first, then data validation, then what specific code to check and which file might need to be checked, or configuration checks.",
   "codeInvestigationAreas": "Specific areas in the application code that should be examined based on the analysis, such as error handling, permission checks, feature flags, or business logic conditions."
 }
 - Output ONLY the JSON object, nothing else.
@@ -199,6 +220,8 @@ Output ONLY a JSON object with the following fields:
 - Be specific about what the response data actually contains and how it affects the application
 - If no API failures AND no relevant data patterns are found, clearly state that the issue is likely in application logic, not network data
 - Provide insights that would help a developer understand what is causing the issue and where to look in the code
+- THOROUGHLY ANALYZE the Jira issue description and correlate it with network findings
+- ONLY analyze data that is actually present in the network logs - DO NOT fabricate or assume data
 `;
       spinner.start('Analyzing Jira issue fields and HAR files...');
       let phase1Analysis;
@@ -207,7 +230,7 @@ Output ONLY a JSON object with the following fields:
         spinner.succeed('Jira issue fields and HAR files analyzed.');
       } catch (err: any) {
         if (err.message && err.message.includes('429')) {
-          spinner.fail('Too many requests to LLM API. Please wait and try again.');
+          spinner.fail('Too many requests to LLM API. Please wait and try again.'); 
         } else {
           spinner.fail('Failed to analyze Jira issue fields and HAR files.');
         }
@@ -221,19 +244,38 @@ Output ONLY a JSON object with the following fields:
       await new Promise(resolve => setTimeout(resolve, 12000));
 
       // Phase 2: Analyze comments + generate final Jira comment
-      const recentComments = (issue.comments || []).slice(-5); // last 5 comments
+      const recentComments = (issue.comments || []).slice(-5); // last 3 comments only
       const commentsText = recentComments
-        .map((c: any) => `Author: ${c.author}\nDate: ${c.created}\n${c.body}`)
+        .map((c: any) => {
+          const authorName = c.author?.displayName || c.author || 'Unknown';
+          const commentBody = this.extractTextFromADF(c.body) || 'No content';
+          return `Author: ${authorName}\nDate: ${c.created}\n${commentBody.substring(0, 400)}${commentBody.length > 400 ? '...' : ''}`;
+        })
         .join('\n---\n');
+        console.log("recentComments", recentComments);
+        console.log("commentsText", `${commentsText}`);
+        console.log("commentsText", JSON.stringify(commentsText, null, 2));
+      
+      // Create a summary of phase1Analysis instead of full JSON
+      const phase1Summary = {
+        apiFailures: phase1Analysis.apiFailureAnalysis ? 'Yes' : 'No',
+        dataIssues: phase1Analysis.dataAnalysis && !phase1Analysis.dataAnalysis.includes('No obvious data patterns') ? 'Yes' : 'No',
+        keyFindings: [
+          phase1Analysis.apiFailureAnalysis?.substring(0, 200) + '...',
+          phase1Analysis.dataAnalysis?.substring(0, 200) + '...',
+          phase1Analysis.uiStateAnalysis?.substring(0, 200) + '...'
+        ].filter(Boolean)
+      };
+
       const phase2Prompt = `
-PREVIOUS ANALYSIS (Phase 1):
-${JSON.stringify(phase1Analysis, null, 2)}
+PREVIOUS ANALYSIS SUMMARY (Phase 1):
+${JSON.stringify(phase1Summary, null, 2)}
 
 RECENT COMMENTS (last 5):
 ${commentsText || 'No recent comments.'}
 
 CRITICAL INSTRUCTIONS:
-You are an expert Jira engineer creating a comprehensive, actionable comment for the team. Your job is to synthesize the network analysis findings and comment insights into a detailed, structured comment that helps the team understand and resolve the issue.
+You are an expert Jira engineer creating a comprehensive, actionable comment for the team. Your job is to synthesize the network analysis findings, Jira issue context, and comment insights into a detailed, structured comment that helps the team understand and resolve the issue.
 
 ⚠️ IMPORTANT RULES:
 1. FIRST PRIORITY: Address any API failures (4xx/5xx status codes) - these are critical issues
@@ -241,20 +283,43 @@ You are an expert Jira engineer creating a comprehensive, actionable comment for
 3. IGNORE response times for successful requests (status 200-299) - these don't cause UI issues
 4. Be specific about what data actually causes UI issues
 5. If no API failures AND no relevant data patterns found, clearly state that the issue is likely in application logic, not network data
+6. ONLY analyze data that is actually present in the network logs - DO NOT make assumptions about data that might exist
+7. If the network logs don't contain relevant data for the reported issue, clearly state this
+
+ANALYSIS REQUIREMENTS:
+1. THOROUGHLY ANALYZE the Jira issue description and comments to understand:
+   - What is the actual problem being reported?
+   - What is the expected behavior vs. actual behavior?
+   - What specific modules, features, or functionality are affected?
+   - What has been tried so far and what were the results?
+
+2. CORRELATE the issue description with network findings:
+   - What APIs would be involved in the reported functionality?
+   - Are there any network patterns that could explain the issue?
+   - Does the network data support or contradict the reported symptoms?
+
+3. ANALYZE comment progression to understand:
+   - How has the team's understanding evolved?
+   - What specific findings or attempts have been documented?
+   - What patterns emerge from the troubleshooting attempts?
+
+4. PROVIDE EVIDENCE-BASED analysis that links:
+   - The reported issue symptoms
+   - Network data findings
+   - Comment insights
+   - Root cause identification
 
 Create a comprehensive Jira comment that includes:
 
-1. API FAILURE SUMMARY: If there are any failed API calls (4xx/5xx status codes), summarize the specific error codes, failed endpoints, and error patterns. If no failures, state "No API failures detected."
+1. API FAILURE SUMMARY: If there are any failed API calls (4xx/5xx status codes), summarize the specific error codes, failed endpoints, and error patterns. if error text is there, include it in the summary. If no failures, state "No API failures detected."
 
-2. DATA ANALYSIS SUMMARY: Summarize the key findings from the data analysis, including what specific data patterns were found and how they might affect the application's behavior. If no relevant patterns found, state "No obvious data patterns that would cause UI issues detected."
+2. DATA ANALYSIS SUMMARY: Summarize what you've identified from network logs related to the reported issue, Identify the exact relavant api call from naming convention and analyze the data returned by the api call. Include what specific data patterns were found and how they might effectively cause the reported issue. If no relevant patterns found, state "No obvious data patterns that would cause UI issues detected."
 
-3. UI STATE IMPLICATIONS: Based on the data analysis, explain what UI behavior would be expected and what conditions might cause UI elements to be disabled or unavailable. Be specific about what data actually controls UI state.
+3. UI STATE IMPLICATIONS: Based on the data analysis, explain what UI behavior would be expected and how the data returned by the api call would affecting the UI. Be specific about what data actually controls UI state.
 
-4. BUSINESS LOGIC INSIGHTS: What business rules, permissions, or configuration settings might be affecting the application's behavior based on the data returned? Only mention if there's specific data evidence.
+4. NEXT STEPS/INVESTIGATION: If the root cause is still not clear, what specific areas should be investigated? Prioritize API failures first, then data processing and business logic. if the root cause is clear, what specific areas should be checked and fix the issue?
 
-5. INVESTIGATION STEPS: What specific areas should be investigated? Prioritize API failures first, then data processing and business logic.
-
-6. ACTIONABLE RECOMMENDATIONS: What specific technical actions should be taken to resolve the issue? Be specific and actionable.
+5. ACTIONABLE RECOMMENDATIONS: What specific technical actions should be taken to resolve the issue? Be specific and actionable.
 
 The comment should be structured, technical, and immediately actionable for the development team. Prioritize API failures over data analysis.
 
@@ -262,7 +327,7 @@ Output ONLY a JSON object with the following fields:
 {
   "commentInsights": "Analysis of what the actual comment content reveals about the issue, team understanding, and progression. Reference specific comments and their implications.",
   "commentSuggestions": "Based on the comment analysis, what specific insights or actions would be most valuable for the team to consider.",
-  "jiraComment": "A comprehensive, structured Jira comment that includes: 1) API failure summary (if any 4xx/5xx errors found) or clear statement if no failures, 2) Data analysis summary with specific findings from API responses (or clear statement if no relevant data found), 3) UI state implications explaining how the data affects application behavior, 4) Business logic insights about permissions, configuration, or rules that might be affecting the issue (only if supported by data), 5) Specific investigation steps prioritizing API failures first, then code areas to examine, 6) Actionable recommendations for resolution. The comment should be technical, evidence-based, and immediately actionable. For Actionable Recommendations, use phrases like 'To resolve this issue, we need to check...' or 'The resolution requires...' instead of 'The developer should...'"
+  "jiraComment": "A comprehensive, structured Jira comment that includes: 1) API failure summary (if any 4xx/5xx errors found) or clear statement if no failures, 2) Data analysis summary with specific findings from API responses (or clear statement if no relevant data found), 3) UI state implications explaining how the data affects application behavior, 4) Next Steps/Investigation: Specific investigation steps prioritizing API failures first, then code areas to examine, 5) Actionable recommendations for resolution. The comment should be technical, evidence-based, and immediately actionable. For Actionable Recommendations, use phrases like 'To resolve this issue, we need to check...' or 'The resolution requires...' instead of 'The developer should...'"
 }
 - Output ONLY the JSON object, nothing else.
 - The jiraComment should be comprehensive and include all the technical details from Phase 1 analysis.
@@ -272,6 +337,7 @@ Output ONLY a JSON object with the following fields:
 - Make Actionable Recommendations less directive by using "we need to" or "the resolution requires" instead of "the developer should".
 - PRIORITIZE API failures over data analysis - if there are 4xx/5xx errors, focus on those first
 - If no API failures AND no relevant data patterns are found, clearly state that the issue is likely in application logic, not network data
+- THOROUGHLY ANALYZE the Jira issue description and comments to provide context-aware recommendations
 `;
       spinner.start('Analyzing comments and generating final Jira comment...');
       let phase2Analysis;
@@ -345,6 +411,7 @@ Output ONLY a JSON object with the following fields:
             console.log(chalk.green(`✓ Parsed ${logs.length} network requests from ${attachment.filename}`));
           } catch (error) {
             console.log(chalk.yellow(`⚠ Could not parse ${attachment.filename}: ${error}`));
+            console.log(chalk.gray('Continuing analysis without this HAR file...'));
           }
         }
       }
@@ -515,5 +582,47 @@ You are an expert Jira engineer. Analyze the above Jira issue, its attachments (
       console.error(chalk.red('Error:'), error);
       throw error;
     }
+  }
+
+  private extractTextFromADF(adf: any): string {
+    if (!adf) return '';
+    
+    // If it's already a string, return it
+    if (typeof adf === 'string') return adf;
+    
+    // If it's an ADF object, extract text from content
+    if (adf.type === 'doc' && adf.content && Array.isArray(adf.content)) {
+      return this.extractTextFromADFContent(adf.content);
+    }
+    
+    // If it's a single content block
+    if (adf.type && adf.content) {
+      return this.extractTextFromADFContent([adf]);
+    }
+    
+    return '';
+  }
+  
+  private extractTextFromADFContent(content: any[]): string {
+    if (!Array.isArray(content)) return '';
+    
+    let text = '';
+    
+    for (const block of content) {
+      if (block.type === 'paragraph' && block.content) {
+        for (const item of block.content) {
+          if (item.type === 'text' && item.text) {
+            text += item.text;
+          }
+        }
+        text += '\n';
+      } else if (block.type === 'text' && block.text) {
+        text += block.text;
+      } else if (block.content && Array.isArray(block.content)) {
+        text += this.extractTextFromADFContent(block.content);
+      }
+    }
+    
+    return text.trim();
   }
 } 

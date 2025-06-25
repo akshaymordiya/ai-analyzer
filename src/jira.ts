@@ -28,10 +28,23 @@ export class JiraClient {
       });
 
       const issue = response.data;
+      
+      // Extract description text from ADF format
+      let description = '';
+      if (issue.fields.description) {
+        if (typeof issue.fields.description === 'string') {
+          description = issue.fields.description;
+        } else if (issue.fields.description.type === 'doc' && issue.fields.description.content) {
+          description = this.extractTextFromADF(issue.fields.description);
+        } else {
+          description = JSON.stringify(issue.fields.description);
+        }
+      }
+      
       return {
         key: issue.key,
         summary: issue.fields.summary,
-        description: issue.fields.description || '',
+        description: description,
         status: issue.fields.status.name,
         priority: issue.fields.priority.name,
         assignee: issue.fields.assignee?.displayName,
@@ -47,6 +60,48 @@ export class JiraClient {
     }
   }
 
+  private extractTextFromADF(adf: any): string {
+    if (!adf) return '';
+    
+    // If it's already a string, return it
+    if (typeof adf === 'string') return adf;
+    
+    // If it's an ADF object, extract text from content
+    if (adf.type === 'doc' && adf.content && Array.isArray(adf.content)) {
+      return this.extractTextFromADFContent(adf.content);
+    }
+    
+    // If it's a single content block
+    if (adf.type && adf.content) {
+      return this.extractTextFromADFContent([adf]);
+    }
+    
+    return '';
+  }
+  
+  private extractTextFromADFContent(content: any[]): string {
+    if (!Array.isArray(content)) return '';
+    
+    let text = '';
+    
+    for (const block of content) {
+      if (block.type === 'paragraph' && block.content) {
+        for (const item of block.content) {
+          if (item.type === 'text' && item.text) {
+            text += item.text;
+          }
+        }
+        text += '\n';
+      } else if (block.type === 'text' && block.text) {
+        text += block.text;
+      } else if (block.content && Array.isArray(block.content)) {
+        text += this.extractTextFromADFContent(block.content);
+      }
+    }
+    
+    return text.trim();
+  }
+
   async getAttachmentContent(attachmentId: string): Promise<string> {
     try {
       // Get attachment metadata to get the download URL
@@ -58,9 +113,11 @@ export class JiraClient {
       const contentResponse = await axiosModule.default.get(attachment.content, {
         responseType: 'arraybuffer',
         headers: {
-          'Authorization': this.client.defaults.auth
-            ? 'Basic ' + Buffer.from(this.client.defaults.auth.username + ':' + this.client.defaults.auth.password).toString('base64')
-            : undefined,
+          ...(this.client.defaults.auth ? {
+            'Authorization': 'Basic ' + Buffer.from(
+              this.client.defaults.auth.username + ':' + this.client.defaults.auth.password
+            ).toString('base64')
+          } : {}),
           'Accept': '*/*'
         }
       });

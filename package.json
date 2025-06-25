@@ -2,13 +2,21 @@
   "name": "ai-debug-helper",
   "version": "1.0.0",
   "main": "index.js",
-  "bin": {
-    "ai-debug-helper": "dist/index.js"
+  "bin": "dist/index.js",
+  "pkg": {
+    "scripts": "dist/index.js",
+    "targets": [
+      "node18-linux-x64",
+      "node18-macos-x64",
+      "node18-win-x64"
+    ],
+    "outputPath": "build"
   },
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "pkg": "pkg ."
   },
   "keywords": [
     "jira",
@@ -22,20 +30,21 @@
   "license": "ISC",
   "description": "AI-powered CLI tool for analyzing MSH tickets and network logs from Jira (using Groq LLM)",
   "dependencies": {
-    "axios": "^1.6.0",
-    "chalk": "^5.4.1",
-    "clipboardy": "^4.0.0",
+    "axios": "^0.27.2",
+    "chalk": "^4.1.2",
+    "clipboardy": "^2.3.0",
     "commander": "^11.1.0",
     "conf": "^12.0.0",
     "har-validator": "^5.1.5",
-    "inquirer": "^12.6.3",
-    "ora": "^7.0.1",
+    "inquirer": "^8.2.6",
+    "ora": "^5.4.1",
     "simple-git": "^3.28.0"
   },
   "devDependencies": {
+    "@types/inquirer": "^9.0.8",
     "@types/node": "^24.0.3",
+    "pkg": "^5.8.0",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3"
-  },
-  "type": "module"
+  }
 }

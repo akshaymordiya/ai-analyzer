@@ -547,6 +547,7 @@ ${JSON.stringify(parsed, null, 2)}
                 // Check for error flags in successful responses
                 if (typeof data === 'object' && (data.error || data.errors || data.success === false)) {
                     dataPatterns.push(`Error flag in successful response: ${log.url}`);
+                    2;
                 }
                 // Check for permission/access flags
                 if (typeof data === 'object' && (data.access || data.permissions || data.authorized)) {
