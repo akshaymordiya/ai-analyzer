@@ -140,33 +140,65 @@ ${networkAnalysis ? networkAnalysis.summary : 'No network logs available'}
 ${networkAnalysis ? `DETAILED NETWORK FINDINGS:
 ${networkAnalysis.detailedAnalysis || 'No detailed analysis available'}` : ''}
 
-INSTRUCTIONS:
-You are an expert Jira engineer and network debugging specialist. Your job is to INVESTIGATE and ANALYZE the actual evidence from the network logs and Jira issue, not to provide generic troubleshooting steps.
+CRITICAL INSTRUCTIONS:
+You are an expert Jira engineer and application debugging specialist. Your job is to INVESTIGATE and ANALYZE both network failures AND data/content from the network logs.
+
+⚠️ IMPORTANT RULES:
+1. FIRST PRIORITY: Identify and analyze any API failures (4xx/5xx status codes) - these are critical issues
+2. SECOND PRIORITY: Analyze data content for UI state issues (permission flags, feature flags, empty data)
+3. IGNORE response times for successful requests (status 200-299) - these don't cause UI issues
+4. Be specific about what data actually causes UI issues
+5. If no API failures AND no relevant data patterns found, say "All network calls look good - issue likely in application logic or data processing."
 
 Based on the detailed network analysis, provide a comprehensive INVESTIGATION that includes:
 
-1. ROOT CAUSE ANALYSIS: Based on the actual HTTP status codes, error messages, and request patterns in the network logs, what is the most likely technical root cause? Be specific about what the evidence shows.
+1. API FAILURE ANALYSIS: Are there any failed API calls (4xx/5xx status codes)? If yes, analyze:
+   - Specific error codes and their meanings
+   - Failed endpoints and their purpose
+   - Error messages in response bodies
+   - Patterns across multiple failures
 
-2. EVIDENCE-BASED FINDINGS: What specific evidence from the network logs supports your analysis? Reference exact APIs, error codes, response times, and patterns.
+2. DATA CONTENT ANALYSIS: What specific data is being returned by the successful API calls? Look for:
+   - Data that might cause UI elements to be disabled (empty arrays, null values, false flags)
+   - Business logic conditions that affect UI state
+   - Missing or incomplete data that could cause functionality issues
+   - Permission flags, feature flags, or configuration settings
 
-3. CONTEXT FROM JIRA: How do the Jira issue details (summary, description, status, etc.) relate to the network failures? What does this tell us about the user's experience?
+3. UI STATE IMPLICATIONS: Based on the data returned, what would be the expected UI behavior? Consider:
+   - What conditions would cause buttons to be disabled/grayed out?
+   - What data patterns would indicate a "loading" or "error" state?
+   - What business rules might be affecting the UI state?
 
-4. SPECIFIC INSIGHTS: What specific technical insights can you draw from the failed requests, response bodies, headers, and timing data?
+4. EVIDENCE-BASED FINDINGS: What specific evidence from the network logs supports your analysis? Reference exact APIs, error codes, data patterns, and content that explains the observed behavior.
 
-5. ACTIONABLE NEXT STEPS: Based on your investigation, what are the most logical next steps need to be taken to resolve the issue? Focus on what the evidence suggests should be investigated first.
+5. CONTEXT FROM JIRA: How do the Jira issue details (summary, description, status, etc.) relate to the network failures and data being returned? What does this tell us about the user's experience and expectations?
+
+6. BUSINESS LOGIC ANALYSIS: Based on the API responses, what business rules or conditions might be causing the reported issue? Look for:
+   - Permission/authorization data that might restrict functionality
+   - Configuration data that might disable features
+   - State data that might indicate why certain actions are unavailable
+
+7. ACTIONABLE NEXT STEPS: Based on your analysis, what specific investigation should be done? Prioritize:
+   - First: Fix any API failures identified
+   - Then: Investigate data processing and business logic
+   - Finally: Check application code for UI state handling
 
 Output ONLY a JSON object with the following fields:
 {
-  "rootCause": "A detailed, evidence-based explanation of the root cause based on the actual HTTP status codes, error details, and request patterns found in the network logs. Reference specific APIs and error types.",
-  "fixSummary": "Based on the investigation findings, what specific actions should be taken to resolve the issues identified in the network logs.",
-  "testCases": ["Specific test scenarios that would verify the root cause and validate the fix based on the actual error conditions found."],
-  "networkFindings": "A detailed summary of the specific evidence found in the network logs - failed APIs, their HTTP status codes, error messages, response times, and any patterns or correlations identified.",
-  "networkFixSuggestions": "Based on the specific errors and patterns found, what targeted actions should be taken to resolve each type of issue identified."
+  "apiFailureAnalysis": "Analysis of any failed API calls (4xx/5xx status codes), including specific error codes, failed endpoints, and error patterns. If no failures, state 'No API failures detected.'",
+  "dataAnalysis": "A detailed analysis of the actual data/content returned by the APIs, focusing on what the data contains and how it might affect UI state. Reference specific response bodies and data patterns. If no relevant patterns found, state 'No obvious data patterns that would cause UI issues detected.'",
+  "uiStateAnalysis": "Analysis of how the returned data would affect UI behavior, including conditions that might cause buttons to be disabled or features to be unavailable. Be specific about what data actually controls UI state.",
+  "businessLogicInsights": "Insights about business rules, permissions, or configuration that might be affecting the application's behavior based on the data returned.",
+  "evidenceFromData": "Specific evidence from the API response data that supports the analysis, including exact data patterns, values, or content that explains the observed behavior.",
+  "investigationSteps": "Specific steps to investigate the root cause, prioritizing API failures first, then data validation, business logic verification, and configuration checks.",
+  "codeInvestigationAreas": "Specific areas in the application code that should be examined based on the analysis, such as error handling, permission checks, feature flags, or business logic conditions."
 }
 - Output ONLY the JSON object, nothing else.
-- Focus on INVESTIGATION and ANALYSIS of the actual evidence, not generic troubleshooting.
-- Be specific about what the network logs and Jira data actually show.
-- Provide insights that would help a developer understand what happened and why.
+- PRIORITIZE API failures over data analysis - if there are 4xx/5xx errors, focus on those first
+- Focus on DATA ANALYSIS and BUSINESS LOGIC for successful requests, not network performance
+- Be specific about what the response data actually contains and how it affects the application
+- If no API failures AND no relevant data patterns are found, clearly state that the issue is likely in application logic, not network data
+- Provide insights that would help a developer understand what is causing the issue and where to look in the code
 `;
       spinner.start('Analyzing Jira issue fields and HAR files...');
       let phase1Analysis;
@@ -200,31 +232,46 @@ ${JSON.stringify(phase1Analysis, null, 2)}
 RECENT COMMENTS (last 5):
 ${commentsText || 'No recent comments.'}
 
-INSTRUCTIONS:
+CRITICAL INSTRUCTIONS:
 You are an expert Jira engineer creating a comprehensive, actionable comment for the team. Your job is to synthesize the network analysis findings and comment insights into a detailed, structured comment that helps the team understand and resolve the issue.
+
+⚠️ IMPORTANT RULES:
+1. FIRST PRIORITY: Address any API failures (4xx/5xx status codes) - these are critical issues
+2. SECOND PRIORITY: Analyze data content for UI state issues (permission flags, feature flags, empty data)
+3. IGNORE response times for successful requests (status 200-299) - these don't cause UI issues
+4. Be specific about what data actually causes UI issues
+5. If no API failures AND no relevant data patterns found, clearly state that the issue is likely in application logic, not network data
 
 Create a comprehensive Jira comment that includes:
 
-1. ROOT CAUSE ANALYSIS: Summarize the technical root cause identified from the network logs, including specific error codes, failed APIs, and evidence.
+1. API FAILURE SUMMARY: If there are any failed API calls (4xx/5xx status codes), summarize the specific error codes, failed endpoints, and error patterns. If no failures, state "No API failures detected."
 
-2. ERROR DETAILS: Provide specific details about the failed requests, including HTTP status codes, response times, and any patterns identified.
+2. DATA ANALYSIS SUMMARY: Summarize the key findings from the data analysis, including what specific data patterns were found and how they might affect the application's behavior. If no relevant patterns found, state "No obvious data patterns that would cause UI issues detected."
 
-3. ACTIONABLE RECOMMENDATIONS: What specific technical actions should be taken to resolve the issue?
+3. UI STATE IMPLICATIONS: Based on the data analysis, explain what UI behavior would be expected and what conditions might cause UI elements to be disabled or unavailable. Be specific about what data actually controls UI state.
 
-The comment should be structured, technical, and immediately actionable for the development team.
+4. BUSINESS LOGIC INSIGHTS: What business rules, permissions, or configuration settings might be affecting the application's behavior based on the data returned? Only mention if there's specific data evidence.
+
+5. INVESTIGATION STEPS: What specific areas should be investigated? Prioritize API failures first, then data processing and business logic.
+
+6. ACTIONABLE RECOMMENDATIONS: What specific technical actions should be taken to resolve the issue? Be specific and actionable.
+
+The comment should be structured, technical, and immediately actionable for the development team. Prioritize API failures over data analysis.
 
 Output ONLY a JSON object with the following fields:
 {
   "commentInsights": "Analysis of what the actual comment content reveals about the issue, team understanding, and progression. Reference specific comments and their implications.",
   "commentSuggestions": "Based on the comment analysis, what specific insights or actions would be most valuable for the team to consider.",
-  "jiraComment": "A comprehensive, structured Jira comment that includes: 1) Root cause analysis with specific technical details from the network logs, 2) Error details including HTTP status codes and failed APIs, 3) Specific next steps and technical actions to take, 4) Actionable recommendations for resolution. The comment should be technical, evidence-based, and immediately actionable. For Actionable Recommendations, use phrases like 'To resolve this issue, we need to check...' or 'The resolution requires...' instead of 'The developer should...'"
+  "jiraComment": "A comprehensive, structured Jira comment that includes: 1) API failure summary (if any 4xx/5xx errors found) or clear statement if no failures, 2) Data analysis summary with specific findings from API responses (or clear statement if no relevant data found), 3) UI state implications explaining how the data affects application behavior, 4) Business logic insights about permissions, configuration, or rules that might be affecting the issue (only if supported by data), 5) Specific investigation steps prioritizing API failures first, then code areas to examine, 6) Actionable recommendations for resolution. The comment should be technical, evidence-based, and immediately actionable. For Actionable Recommendations, use phrases like 'To resolve this issue, we need to check...' or 'The resolution requires...' instead of 'The developer should...'"
 }
 - Output ONLY the JSON object, nothing else.
 - The jiraComment should be comprehensive and include all the technical details from Phase 1 analysis.
 - Focus on providing actionable, technical guidance based on the evidence.
-- Structure the comment clearly with sections for root cause, errors, next steps, and recommendations.
+- Structure the comment clearly with sections for API failures, data analysis, UI implications, business logic, investigation steps, and recommendations.
 - Do NOT include a "Context from Comments" section.
 - Make Actionable Recommendations less directive by using "we need to" or "the resolution requires" instead of "the developer should".
+- PRIORITIZE API failures over data analysis - if there are 4xx/5xx errors, focus on those first
+- If no API failures AND no relevant data patterns are found, clearly state that the issue is likely in application logic, not network data
 `;
       spinner.start('Analyzing comments and generating final Jira comment...');
       let phase2Analysis;

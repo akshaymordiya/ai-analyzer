@@ -144,23 +144,26 @@ export class NetworkAnalyzer {
         const clientErrors = logs.filter(log => log.statusCode >= 400 && log.statusCode < 500);
         // Analyze payload issues
         const payloadIssues = this.analyzePayloadIssues(logs);
-        // Enhanced summary with timeout details
+        // Enhanced summary with data analysis focus
+        const successfulRequests = logs.filter(log => log.statusCode >= 200 && log.statusCode < 300);
+        const dataAnalysisSummary = this.generateDataAnalysisSummary(successfulRequests);
         const timeoutDetails = timeoutIssues.length > 0 ?
             `\n- Timeout issues: ${timeoutIssues.length} (including ${timeoutIssues.filter(log => log.responseTime > 60000).length} extreme timeouts >1min)` :
             '';
         const summary = `
 Network Analysis Summary:
 - Total requests: ${logs.length}
+- Successful requests (2xx): ${successfulRequests.length}
 - Failed requests (4xx/5xx): ${failedRequests.length}
-- Slow requests (>5s): ${slowRequests.length}
-- Authentication issues: ${authenticationIssues.length}${timeoutDetails}
 - Server errors (5xx): ${serverErrors.length}
 - Client errors (4xx): ${clientErrors.length}
-- Payload issues detected: ${payloadIssues.length}
-- Average response time: ${this.calculateAverageResponseTime(logs)}ms
-- Most common error: ${this.getMostCommonError(errors)}
-- Longest request: ${this.getLongestRequest(logs)}
-    `.trim();
+- Slow requests (>5s): ${slowRequests.length}
+- Authentication issues: ${authenticationIssues.length}${timeoutDetails}
+
+${failedRequests.length > 0 ? `🚨 CRITICAL: ${failedRequests.length} API failures detected - these should be investigated first` : ''}
+
+${dataAnalysisSummary}
+`;
         const detailedAnalysis = this.generateDetailedAnalysis(logs, payloadIssues, timeoutIssues);
         return {
             errors,
@@ -252,14 +255,47 @@ ${JSON.stringify(parsed, null, 2)}
     }
     static generateDetailedAnalysis(logs, payloadIssues, timeoutIssues) {
         const analysis = [];
-        // Add timeout analysis
-        if (timeoutIssues.length > 0) {
+        // FIRST PRIORITY: Add API failure analysis
+        const failedRequests = logs.filter(log => log.statusCode >= 400);
+        if (failedRequests.length > 0) {
+            analysis.push('🚨 API FAILURE ANALYSIS:');
+            failedRequests.forEach(log => {
+                analysis.push(`  • ${log.method} ${log.url}`);
+                analysis.push(`    Status: ${log.statusCode} (${this.getStatusDescription(log.statusCode)})`);
+                analysis.push(`    Response time: ${log.responseTime}ms`);
+                if (log.responseBody) {
+                    analysis.push(`    Error response: ${log.responseBody.substring(0, 200)}${log.responseBody.length > 200 ? '...' : ''}`);
+                }
+                analysis.push('');
+            });
+        }
+        // SECOND PRIORITY: Add data content analysis for successful requests
+        const successfulRequests = logs.filter(log => log.statusCode >= 200 && log.statusCode < 300);
+        if (successfulRequests.length > 0) {
+            analysis.push('📊 DATA CONTENT ANALYSIS:');
+            const dataInsights = this.analyzeDataContent(successfulRequests);
+            if (dataInsights.length > 0) {
+                dataInsights.forEach(insight => analysis.push(`  • ${insight}`));
+            }
+            else {
+                analysis.push('  • All successful API calls returned expected data - no obvious data patterns that would cause UI issues');
+                analysis.push('  • Issue likely in application logic or data processing, not network data');
+            }
+            analysis.push('');
+        }
+        // Only add timeout analysis for actual timeout errors (not just slow successful requests)
+        const actualTimeoutErrors = timeoutIssues.filter(log => log.statusCode === 408 ||
+            log.statusCode === 504 ||
+            log.responseBody?.toLowerCase().includes('timeout') ||
+            log.responseTime > 60000 // Only extreme timeouts
+        );
+        if (actualTimeoutErrors.length > 0) {
             analysis.push('🚨 TIMEOUT ANALYSIS:');
-            timeoutIssues.forEach(log => {
+            actualTimeoutErrors.forEach(log => {
                 const isExtreme = log.responseTime > 60000;
                 const isGraphQL = log.url?.includes('graphql');
                 analysis.push(`  • ${log.method} ${log.url}`);
-                analysis.push(`    Response time: ${log.responseTime}ms (${isExtreme ? 'EXTREME' : 'slow'})`);
+                analysis.push(`    Response time: ${log.responseTime}ms (${isExtreme ? 'EXTREME' : 'timeout'})`);
                 analysis.push(`    Status: ${log.statusCode} ${isGraphQL ? '(GraphQL)' : ''}`);
                 if (log.responseTime > 60000) {
                     analysis.push(`    ⚠️  This request took over 1 minute - likely a timeout issue`);
@@ -296,6 +332,77 @@ ${JSON.stringify(parsed, null, 2)}
             analysis.push('');
         }
         return analysis.join('\n');
+    }
+    static getStatusDescription(statusCode) {
+        switch (statusCode) {
+            case 400: return 'Bad Request';
+            case 401: return 'Unauthorized';
+            case 403: return 'Forbidden';
+            case 404: return 'Not Found';
+            case 408: return 'Request Timeout';
+            case 500: return 'Internal Server Error';
+            case 502: return 'Bad Gateway';
+            case 503: return 'Service Unavailable';
+            case 504: return 'Gateway Timeout';
+            default: return 'Error';
+        }
+    }
+    static analyzeDataContent(successfulRequests) {
+        const insights = [];
+        // Analyze response data for UI state implications
+        successfulRequests.forEach(log => {
+            if (!log.responseBody)
+                return;
+            try {
+                const data = JSON.parse(log.responseBody);
+                // Check for empty data that might disable UI elements
+                if (Array.isArray(data) && data.length === 0) {
+                    insights.push(`Empty array response from ${log.url} - may cause UI elements to be disabled`);
+                }
+                if (typeof data === 'object' && Object.keys(data).length === 0) {
+                    insights.push(`Empty object response from ${log.url} - may indicate missing configuration`);
+                }
+                // Check for permission/access data
+                if (typeof data === 'object' && (data.permissions || data.access || data.authorized)) {
+                    insights.push(`Permission/access data in ${log.url} - may affect UI state based on user rights`);
+                }
+                // Check for feature flags
+                if (typeof data === 'object' && (data.enabled !== undefined || data.disabled !== undefined)) {
+                    insights.push(`Feature flag data in ${log.url} - may control UI element visibility/state`);
+                }
+                // Check for business logic flags
+                if (typeof data === 'object' && (data.available || data.ready || data.active)) {
+                    insights.push(`Business logic flag in ${log.url} - may determine if actions are available`);
+                }
+                // Check for error flags in successful responses
+                if (typeof data === 'object' && (data.error || data.errors || data.success === false)) {
+                    insights.push(`Error flag in successful response from ${log.url} - may cause UI to show error state`);
+                }
+                // Check for loading/processing states
+                if (typeof data === 'object' && (data.loading || data.processing || data.status)) {
+                    insights.push(`State data in ${log.url} - may control UI loading/processing indicators`);
+                }
+            }
+            catch (e) {
+                // Skip non-JSON responses
+            }
+        });
+        // Analyze patterns across multiple responses
+        const emptyResponses = successfulRequests.filter(log => {
+            if (!log.responseBody)
+                return true;
+            try {
+                const data = JSON.parse(log.responseBody);
+                return Array.isArray(data) && data.length === 0;
+            }
+            catch {
+                return false;
+            }
+        });
+        if (emptyResponses.length > 0) {
+            insights.push(`Multiple empty responses (${emptyResponses.length}) - may indicate data loading issues or missing configuration`);
+        }
+        return insights;
     }
     static analyzeErrorPatterns(logs) {
         const patterns = [];
@@ -398,5 +505,93 @@ ${JSON.stringify(parsed, null, 2)}
             return 'N/A';
         const longest = logs.reduce((max, log) => log.responseTime > max.responseTime ? log : max);
         return `${longest.method} ${longest.url} (${longest.responseTime}ms)`;
+    }
+    static generateDataAnalysisSummary(successfulRequests) {
+        if (successfulRequests.length === 0) {
+            return 'No successful requests to analyze.';
+        }
+        const dataAnalysis = [];
+        // Analyze response data patterns
+        const emptyResponses = successfulRequests.filter(log => !log.responseBody ||
+            log.responseBody.trim() === '' ||
+            log.responseBody === '{}' ||
+            log.responseBody === '[]' ||
+            log.responseBody === 'null');
+        const jsonResponses = successfulRequests.filter(log => {
+            if (!log.responseBody)
+                return false;
+            try {
+                const parsed = JSON.parse(log.responseBody);
+                return typeof parsed === 'object';
+            }
+            catch {
+                return false;
+            }
+        });
+        // Analyze JSON response patterns
+        const dataPatterns = [];
+        jsonResponses.forEach(log => {
+            try {
+                const data = JSON.parse(log.responseBody);
+                // Check for empty arrays/objects
+                if (Array.isArray(data) && data.length === 0) {
+                    dataPatterns.push(`Empty array in ${log.url}`);
+                }
+                if (typeof data === 'object' && Object.keys(data).length === 0) {
+                    dataPatterns.push(`Empty object in ${log.url}`);
+                }
+                // Check for null/undefined values
+                if (data === null || data === undefined) {
+                    dataPatterns.push(`Null response in ${log.url}`);
+                }
+                // Check for error flags in successful responses
+                if (typeof data === 'object' && (data.error || data.errors || data.success === false)) {
+                    dataPatterns.push(`Error flag in successful response: ${log.url}`);
+                }
+                // Check for permission/access flags
+                if (typeof data === 'object' && (data.access || data.permissions || data.authorized)) {
+                    dataPatterns.push(`Permission data in ${log.url}`);
+                }
+                // Check for feature flags
+                if (typeof data === 'object' && (data.enabled || data.disabled || data.featureFlags)) {
+                    dataPatterns.push(`Feature flag data in ${log.url}`);
+                }
+            }
+            catch (e) {
+                // Skip non-JSON responses
+            }
+        });
+        dataAnalysis.push(`Data Analysis:`);
+        dataAnalysis.push(`- Successful API calls: ${successfulRequests.length}`);
+        dataAnalysis.push(`- Empty/null responses: ${emptyResponses.length}`);
+        dataAnalysis.push(`- JSON responses: ${jsonResponses.length}`);
+        if (dataPatterns.length > 0) {
+            dataAnalysis.push(`- Data patterns detected: ${dataPatterns.length}`);
+            dataPatterns.slice(0, 5).forEach(pattern => {
+                dataAnalysis.push(`  • ${pattern}`);
+            });
+            if (dataPatterns.length > 5) {
+                dataAnalysis.push(`  • ... and ${dataPatterns.length - 5} more patterns`);
+            }
+        }
+        else {
+            dataAnalysis.push(`- No obvious data patterns that would cause UI issues detected`);
+            dataAnalysis.push(`- All successful API calls returned expected data`);
+        }
+        // Analyze specific API endpoints for business logic
+        const businessLogicAPIs = successfulRequests.filter(log => log.url.includes('permissions') ||
+            log.url.includes('access') ||
+            log.url.includes('config') ||
+            log.url.includes('settings') ||
+            log.url.includes('features') ||
+            log.url.includes('enabled') ||
+            log.url.includes('disabled'));
+        if (businessLogicAPIs.length > 0) {
+            dataAnalysis.push(`- Business logic APIs: ${businessLogicAPIs.length}`);
+            businessLogicAPIs.slice(0, 3).forEach(log => {
+                dataAnalysis.push(`  • ${log.method} ${log.url}`);
+            });
+        }
+        return dataAnalysis.join('\n');
     }
 }
